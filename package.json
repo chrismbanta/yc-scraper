@@ -1,0 +1,13 @@
+{
+  "name": "yc-directory-sync",
+  "private": true,
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "tail": "wrangler tail",
+    "run-now": "curl -s -X POST \"$WORKER_URL/run\" -H \"x-trigger-secret: $TRIGGER_SECRET\" | python3 -m json.tool"
+  },
+  "devDependencies": {
+    "wrangler": "4.120.1"
+  }
+}
