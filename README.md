@@ -29,6 +29,75 @@ The very first run has an empty KV, so everything matching the filters
 counts as new, that run **is** the backfill. No separate backfill mode
 exists or is needed.
 
+## The Clay side: webhook to table
+
+Clay is the destination. Every new YC company lands as its own row in a Clay
+table, through that table's **Webhook source**.
+
+### Setting it up in Clay
+
+1. Create a new Clay table.
+2. **Add source → Webhook.** Clay generates a unique URL for that table.
+3. Copy the URL and store it as the Worker secret `CLAY_WEBHOOK_URL` (see
+   Setup below). It's a secret, never commit it: anyone holding it can write
+   rows into your table.
+4. Trigger the first run. Clay creates a column for every field in the
+   payload automatically, so there's no mapping step.
+
+### What arrives in each row
+
+The Worker normalises each Algolia hit before sending it, so Clay always gets
+the same clean shape no matter how YC's index changes underneath:
+
+```json
+{
+  "id": "29411",
+  "name": "ExampleCo",
+  "website": "https://example.com",
+  "one_liner": "AI copilot for freight brokers",
+  "long_description": "ExampleCo helps brokers quote loads in seconds...",
+  "team_size": 4,
+  "batch": "Fall 2025",
+  "industries": ["B2B", "Supply Chain and Logistics"],
+  "regions": ["United States of America", "America / Canada"],
+  "stage": "Early",
+  "status": "Active",
+  "launched_at": "2025-10-02T00:00:00.000Z",
+  "yc_profile_url": "https://www.ycombinator.com/companies/exampleco"
+}
+```
+
+| Field | Why it's there |
+|---|---|
+| `id` | YC's own object ID. The dedupe key, also stored in KV |
+| `name`, `website` | Ready for Clay's company enrichment (domain is the join key) |
+| `one_liner`, `long_description` | Input for AI columns: ICP fit, use case, personalisation |
+| `team_size`, `stage`, `status` | Quick qualification filters |
+| `batch`, `industries`, `regions` | Same facets the Worker filtered on, so the table can be sliced the same way |
+| `launched_at` | Converted from a Unix timestamp to ISO 8601 so Clay reads it as a date |
+| `yc_profile_url` | Built from the slug, one click back to the source |
+
+### Delivery guarantees
+
+- **One company per webhook call.** Clay's webhook source rejects large
+  batched arrays (`413`), so records are never sent as one big array.
+- **Throttled.** Three requests at a time with a 300ms pause between batches,
+  to stay under Clay's rate limit.
+- **Retries on `429` only.** Backoff of 500ms, 1s, 1.5s. A `429` means "slow
+  down", so it's worth retrying. Any other error fails straight away.
+- **Nothing is marked seen until Clay accepts it.** KV is only updated with
+  companies that were actually delivered, so a failed push is retried
+  automatically on the next scheduled run. No duplicates, nothing lost.
+- **Every run returns a summary**: matching, new, pushed and failed counts, so
+  you can check a run without opening Clay.
+
+### From here
+
+Once the rows land, it's a normal Clay table. Enrichment, AI research
+columns, contact finding and CRM or sequencer pushes all run off the webhook
+rows as they arrive, so new YC companies flow straight into whatever
+workflow the table feeds.
+
 ## Setup
 
 ```bash
